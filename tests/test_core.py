@@ -96,3 +96,106 @@ def test_migrate_retries_with_strong_model(monkeypatch, tmp_path):
     assert attempts[1].success is True
     assert attempts[1].edit_count == 1
     assert source.read_text() == "int* pointer = nullptr;\n"
+
+
+def test_extract_context_limits_source_window():
+    from cppmigrate.patcher import extract_context
+
+    source = "\n".join(
+        f"line {number}"
+        for number in range(1, 101)
+    )
+
+    context = extract_context(
+        source,
+        line_numbers=[50],
+        radius=2,
+    )
+
+    assert context.splitlines() == [
+        "line 48",
+        "line 49",
+        "line 50",
+        "line 51",
+        "line 52",
+    ]
+
+
+def test_migrate_preserves_crlf_line_endings(
+    monkeypatch,
+    tmp_path,
+):
+    import cppmigrate.loop as migration_loop
+    from cppmigrate.scanner import Candidate
+    from cppmigrate.validator import ValidationResult
+
+    source = tmp_path / "windows.cpp"
+    source.write_bytes(
+        b"int* pointer = NULL;\r\n"
+        b"int value = 1;\r\n"
+    )
+
+    candidate = Candidate(
+        file="windows.cpp",
+        pattern="nullptr",
+        description="Replace NULL with nullptr.",
+        line_numbers=[1],
+    )
+
+    monkeypatch.setattr(
+        migration_loop,
+        "propose_edits",
+        lambda source_text, candidate, feedback, tier: [
+            {"old": "NULL", "new": "nullptr"}
+        ],
+    )
+
+    monkeypatch.setattr(
+        migration_loop,
+        "validate",
+        lambda repo: ValidationResult(
+            ok=True,
+            stage="test",
+            log_tail="",
+        ),
+    )
+
+    result, attempts = migration_loop.migrate_file(
+        tmp_path,
+        candidate,
+    )
+
+    assert result.success is True
+    assert attempts[0].success is True
+    assert source.read_bytes() == (
+        b"int* pointer = nullptr;\r\n"
+        b"int value = 1;\r\n"
+    )
+
+
+def test_apply_multiline_edit_to_crlf_source():
+    source = (
+        "XMLNode* current = first;\r\n"
+        "while (current != NULL) {\r\n"
+        "    current = current->next;\r\n"
+        "}\r\n"
+    )
+
+    edits = [
+        {
+            "old": (
+                "XMLNode* current = first;\n"
+                "while (current != NULL) {"
+            ),
+            "new": (
+                "XMLNode* current = first;\n"
+                "while (current != nullptr) {"
+            ),
+        }
+    ]
+
+    result = apply_edits(source, edits)
+
+    assert "current != nullptr" in result
+    assert result.count("\r\n") == 4
+    assert "\n" not in result.replace("\r\n", "")

@@ -31,6 +31,23 @@ class Result:
     seconds: float
     note: str = ""
 
+def read_source(path: Path) -> str:
+    with path.open(
+        "r",
+        encoding="utf-8",
+        newline="",
+    ) as source_file:
+        return source_file.read()
+
+
+def write_source(path: Path, content: str) -> None:
+    with path.open(
+        "w",
+        encoding="utf-8",
+        newline="",
+    ) as source_file:
+        source_file.write(content)
+
 
 def migrate_file(
     repo: Path,
@@ -38,7 +55,7 @@ def migrate_file(
     max_retries: int = 3,
 ) -> tuple[Result, list[AttemptResult]]:
     path = repo / cand.file
-    original = path.read_text()
+    original = read_source(path)
     feedback = None
     migration_start = time.time()
     attempt_results: list[AttemptResult] = []
@@ -73,7 +90,7 @@ def migrate_file(
             )
             continue
 
-        path.write_text(new_source)
+        write_source(path, new_source)
         validation = validate(repo)
 
         if validation.ok:
@@ -118,7 +135,7 @@ def migrate_file(
             )
         )
 
-        path.write_text(original)
+        write_source(path, original)
 
     result = Result(
         file=cand.file,
@@ -136,6 +153,7 @@ def run(
     pattern: str,
     limit: int,
     out: Path,
+    target_file: str | None = None,
 ) -> list[Result]:
     if not configure(repo).ok or not validate(repo).ok:
         raise SystemExit(
@@ -145,7 +163,22 @@ def run(
 
     results: list[Result] = []
 
-    for candidate in scan(repo, pattern)[:limit]:
+    candidates = scan(repo, pattern)
+
+    if target_file is not None:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.file == target_file
+        ]
+
+        if not candidates:
+            raise SystemExit(
+                f"No {pattern!r} candidate found in "
+                f"{target_file!r}."
+            )
+
+    for candidate in candidates[:limit]:
         result, attempt_results = migrate_file(repo, candidate)
         results.append(result)
 
