@@ -35,3 +35,64 @@ def test_scan_finds_simple_typedef(tmp_path):
     assert found[0].file == "types.h"
     assert found[0].pattern == "using"
     assert found[0].line_numbers == [1]
+
+
+def test_migrate_retries_with_strong_model(monkeypatch, tmp_path):
+    import cppmigrate.loop as migration_loop
+    from cppmigrate.scanner import Candidate
+    from cppmigrate.validator import ValidationResult
+
+    source = tmp_path / "a.cpp"
+    source.write_text("int* pointer = NULL;\n")
+
+    candidate = Candidate(
+        file="a.cpp",
+        pattern="nullptr",
+        description="Replace NULL with nullptr.",
+        line_numbers=[1],
+    )
+
+    calls = []
+
+    def fake_propose(source_text, candidate, feedback, tier):
+        calls.append((feedback, tier))
+
+        if len(calls) == 1:
+            raise EditError("invalid model JSON")
+
+        return [{"old": "NULL", "new": "nullptr"}]
+
+    def fake_validate(repo):
+        return ValidationResult(
+            ok=True,
+            stage="test",
+            log_tail="",
+        )
+
+    monkeypatch.setattr(
+        migration_loop,
+        "propose_edits",
+        fake_propose,
+    )
+    monkeypatch.setattr(
+        migration_loop,
+        "validate",
+        fake_validate,
+    )
+
+    result, attempts = migration_loop.migrate_file(
+        tmp_path,
+        candidate,
+    )
+
+    assert result.success is True
+    assert result.attempts == 2
+    assert [attempt.model_tier for attempt in attempts] == [
+        "fast",
+        "strong",
+    ]
+    assert attempts[0].stage == "patch"
+    assert attempts[0].success is False
+    assert attempts[1].success is True
+    assert attempts[1].edit_count == 1
+    assert source.read_text() == "int* pointer = nullptr;\n"

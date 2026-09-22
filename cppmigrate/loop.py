@@ -10,6 +10,19 @@ from .validator import configure, validate
 
 
 @dataclass
+class AttemptResult:
+    file: str
+    pattern: str
+    attempt: int
+    model_tier: str
+    success: bool
+    stage: str
+    seconds: float
+    edit_count: int = 0
+    note: str = ""
+
+
+@dataclass
 class Result:
     file: str
     pattern: str
@@ -19,36 +32,140 @@ class Result:
     note: str = ""
 
 
-def migrate_file(repo: Path, cand: Candidate, max_retries: int = 3) -> Result:
+def migrate_file(
+    repo: Path,
+    cand: Candidate,
+    max_retries: int = 3,
+) -> tuple[Result, list[AttemptResult]]:
     path = repo / cand.file
     original = path.read_text()
-    feedback, t0 = None, time.time()
+    feedback = None
+    migration_start = time.time()
+    attempt_results: list[AttemptResult] = []
+
     for attempt in range(1, max_retries + 1):
-        tier = "fast" if attempt == 1 else "strong"  # escalate on failure
+        attempt_start = time.time()
+        tier = "fast" if attempt == 1 else "strong"
+
         try:
-            new = apply_edits(original, propose_edits(original, cand, feedback, tier))
-        except EditError as e:
-            feedback = str(e)
+            edits = propose_edits(
+                original,
+                cand,
+                feedback,
+                tier,
+            )
+            new_source = apply_edits(original, edits)
+
+        except EditError as error:
+            feedback = str(error)
+
+            attempt_results.append(
+                AttemptResult(
+                    file=cand.file,
+                    pattern=cand.pattern,
+                    attempt=attempt,
+                    model_tier=tier,
+                    success=False,
+                    stage="patch",
+                    seconds=time.time() - attempt_start,
+                    note=feedback[:200],
+                )
+            )
             continue
-        path.write_text(new)
-        res = validate(repo)
-        if res.ok:
-            return Result(cand.file, cand.pattern, True, attempt, time.time() - t0)
-        feedback = f"[{res.stage} failed]\n{res.log_tail}"
-        path.write_text(original)  # revert before retrying
-    return Result(cand.file, cand.pattern, False, max_retries, time.time() - t0, (feedback or "")[:200])
+
+        path.write_text(new_source)
+        validation = validate(repo)
+
+        if validation.ok:
+            attempt_results.append(
+                AttemptResult(
+                    file=cand.file,
+                    pattern=cand.pattern,
+                    attempt=attempt,
+                    model_tier=tier,
+                    success=True,
+                    stage="test",
+                    seconds=time.time() - attempt_start,
+                    edit_count=len(edits),
+                )
+            )
+
+            result = Result(
+                file=cand.file,
+                pattern=cand.pattern,
+                success=True,
+                attempts=attempt,
+                seconds=time.time() - migration_start,
+            )
+            return result, attempt_results
+
+        feedback = (
+            f"[{validation.stage} failed]\n"
+            f"{validation.log_tail}"
+        )
+
+        attempt_results.append(
+            AttemptResult(
+                file=cand.file,
+                pattern=cand.pattern,
+                attempt=attempt,
+                model_tier=tier,
+                success=False,
+                stage=validation.stage,
+                seconds=time.time() - attempt_start,
+                edit_count=len(edits),
+                note=feedback[:200],
+            )
+        )
+
+        path.write_text(original)
+
+    result = Result(
+        file=cand.file,
+        pattern=cand.pattern,
+        success=False,
+        attempts=max_retries,
+        seconds=time.time() - migration_start,
+        note=(feedback or "")[:200],
+    )
+    return result, attempt_results
 
 
-def run(repo: Path, pattern: str, limit: int, out: Path) -> list[Result]:
+def run(
+    repo: Path,
+    pattern: str,
+    limit: int,
+    out: Path,
+) -> list[Result]:
     if not configure(repo).ok or not validate(repo).ok:
-        raise SystemExit("Baseline build/tests fail: pick a repo that passes before changes.")
-    results = []
-    for cand in scan(repo, pattern)[:limit]:
-        r = migrate_file(repo, cand)
-        results.append(r)
-        print(f"{'OK ' if r.success else 'FAIL'} {r.file} (attempts={r.attempts})")
-        with out.open("a") as f:
-            f.write(json.dumps(asdict(r)) + "\n")
-    ok = sum(r.success for r in results)
-    print(f"\n{ok}/{len(results)} patches validated")
+        raise SystemExit(
+            "Baseline build/tests fail: "
+            "pick a repo that passes before changes."
+        )
+
+    results: list[Result] = []
+
+    for candidate in scan(repo, pattern)[:limit]:
+        result, attempt_results = migrate_file(repo, candidate)
+        results.append(result)
+
+        print(
+            f"{'OK ' if result.success else 'FAIL'} "
+            f"{result.file} "
+            f"(attempts={result.attempts})"
+        )
+
+        with out.open("a") as output_file:
+            for attempt_result in attempt_results:
+                output_file.write(
+                    json.dumps(asdict(attempt_result)) + "\n"
+                )
+
+    successful = sum(result.success for result in results)
+
+    print(
+        f"\n{successful}/{len(results)} "
+        "patches validated"
+    )
     return results
+
