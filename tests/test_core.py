@@ -199,3 +199,42 @@ def test_apply_multiline_edit_to_crlf_source():
     assert "current != nullptr" in result
     assert result.count("\r\n") == 4
     assert "\n" not in result.replace("\r\n", "")
+
+
+def test_parse_clang_diagnostics_deduplicates_candidates(
+    tmp_path,
+):
+    from cppmigrate.clang_scanner import (
+        parse_clang_diagnostics,
+    )
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "main.cpp"
+
+    diagnostic = (
+        f"{source}:10:17: warning: use nullptr "
+        "[modernize-use-nullptr]\n"
+    )
+
+    output = (
+        diagnostic
+        + diagnostic
+        + "/usr/include/header.h:20:4: warning: use nullptr "
+        "[modernize-use-nullptr]\n"
+    )
+
+    candidates = parse_clang_diagnostics(
+        output,
+        repo,
+        "nullptr",
+    )
+
+    assert len(candidates) == 1
+
+    candidate = candidates[0]
+    assert candidate.file == "main.cpp"
+    assert candidate.line_numbers == [10]
+    assert candidate.columns == [17]
+    assert candidate.backend == "clang-tidy"
+    assert candidate.check == "modernize-use-nullptr"

@@ -22,6 +22,9 @@ class Candidate:
     pattern: str
     description: str
     line_numbers: list[int] = field(default_factory=list)
+    columns: list[int] = field(default_factory=list)
+    backend: str = "regex"
+    check: str = ""
 
 
 def scan(repo: Path, pattern: str) -> list[Candidate]:
