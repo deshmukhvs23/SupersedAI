@@ -23,8 +23,34 @@ scan (regex or clang-tidy) -> LLM proposes exact-match edits -> apply -> cmake b
 Each attempt is appended to `results.jsonl` (attempt number, model tier, stage, success, edit count, seconds) to compute the numbers
 for your write-up: validated patches / attempted, avg attempts, time per fix.
 
+## Evaluation
+
+On the first five `clang-tidy` `modernize-use-nullptr` candidates from
+TinyXML-2 revision `8224e42`, both patching strategies validated all five
+changes through CMake and CTest.
+
+| Metric | Global matching | Location-aware |
+|---|---:|---:|
+| First-pass success | 20% | 80% |
+| Escalation rate | 80% | 20% |
+| Total attempts | 10 | 6 |
+| Strong-model calls | 5 | 1 |
+| Non-unique-match failures | 4 | 0 |
+
+Location-aware matching eliminated ambiguous global matches and reduced total
+attempts by 40%. Latency did not improve in this small run because of two slow
+model responses, so more repetitions are required.
+
+See [the complete evaluation report](evaluations/README.md) for methodology,
+latency results, limitations, raw JSONL records, and source diffs.
+
 ## Status
-MVP: regex and clang-tidy discovery, patterns `nullptr` and `using`, exact-match edits, model escalation, rollback, target-anchored prompts, newline preservation, and per-attempt metrics. Next: full-repository evaluation, failure taxonomy, sandboxed validation, and harder ownership-aware migrations.
+MVP: regex and clang-tidy discovery, `nullptr` and `using` patterns,
+target-anchored prompts, location-aware patch application, model escalation,
+rollback, failure taxonomy, newline preservation, JSONL metrics, and a
+reproducible evaluation summarizer. Next: repeated full-repository evaluation,
+sandboxed validation, token/cost instrumentation, and ownership-aware
+migrations.
 
 ## License
 MIT

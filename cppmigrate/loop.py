@@ -1,7 +1,7 @@
 """Core agent loop: propose edit -> apply -> build/test -> feed failures back -> retry."""
 import json
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 from .clang_scanner import scan_clang
@@ -21,6 +21,11 @@ class AttemptResult:
     seconds: float
     edit_count: int = 0
     note: str = ""
+    backend: str = "regex"
+    check: str = ""
+    line_numbers: list[int] = field(default_factory=list)
+    columns: list[int] = field(default_factory=list)
+    failure_category: str = ""
 
 
 @dataclass
@@ -32,6 +37,7 @@ class Result:
     seconds: float
     note: str = ""
 
+
 def read_source(path: Path) -> str:
     with path.open(
         "r",
@@ -39,6 +45,45 @@ def read_source(path: Path) -> str:
         newline="",
     ) as source_file:
         return source_file.read()
+
+def candidate_metadata(cand: Candidate) -> dict:
+    return {
+        "backend": cand.backend,
+        "check": cand.check,
+        "line_numbers": list(cand.line_numbers),
+        "columns": list(cand.columns),
+    }
+
+
+def classify_failure(stage: str, message: str) -> str:
+    if "timeout after" in message:
+        return "timeout"
+
+    if stage == "patch":
+        if "valid edit JSON" in message:
+            return "malformed_model_response"
+
+        if "matched 0" in message:
+            return "no_exact_match"
+
+        if "must match exactly once" in message:
+            return "non_unique_match"
+
+        if "malformed edit" in message:
+            return "malformed_edit"
+
+        if "no edits returned" in message:
+            return "no_edits"
+
+        return "patch_error"
+
+    if stage == "build":
+        return "compile_error"
+
+    if stage == "test":
+        return "test_failure"
+
+    return f"{stage}_failure"
 
 
 def write_source(path: Path, content: str) -> None:
@@ -73,7 +118,7 @@ def migrate_file(
                 feedback,
                 tier,
             )
-            new_source = apply_edits(original, edits)
+            new_source = apply_edits(original, edits, candidate=cand,)
 
         except EditError as error:
             feedback = str(error)
@@ -88,6 +133,11 @@ def migrate_file(
                     stage="patch",
                     seconds=time.time() - attempt_start,
                     note=feedback[:200],
+                    failure_category=classify_failure(
+                        "patch",
+                        feedback,
+                    ),
+                    **candidate_metadata(cand),
                 )
             )
             continue
@@ -106,6 +156,7 @@ def migrate_file(
                     stage="test",
                     seconds=time.time() - attempt_start,
                     edit_count=len(edits),
+		    **candidate_metadata(cand),
                 )
             )
 
@@ -134,6 +185,11 @@ def migrate_file(
                 seconds=time.time() - attempt_start,
                 edit_count=len(edits),
                 note=feedback[:200],
+		failure_category=classify_failure(
+			validation.stage,
+			validation.log_tail,
+		),
+		**candidate_metadata(cand),
             )
         )
 

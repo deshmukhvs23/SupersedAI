@@ -12,6 +12,10 @@ __pycache__/
 build/
 results.jsonl
 *.jsonl
+results.jsonl
+*.jsonl
+!evaluations/raw/*.jsonl
+evaluations/raw/*.diff
 
 # Editors and OS
 .vscode/

@@ -296,3 +296,101 @@ def test_parse_edits_accepts_one_extra_closing_brace():
     assert parse_edits(raw) == [
         {"old": "0", "new": "nullptr"}
     ]
+def test_candidate_metadata_and_failure_taxonomy():
+    from cppmigrate.loop import (
+        candidate_metadata,
+        classify_failure,
+    )
+    from cppmigrate.scanner import Candidate
+
+    candidate = Candidate(
+        file="main.cpp",
+        pattern="nullptr",
+        description="Use nullptr.",
+        line_numbers=[12],
+        columns=[24],
+        backend="clang-tidy",
+        check="modernize-use-nullptr",
+    )
+
+    assert candidate_metadata(candidate) == {
+        "backend": "clang-tidy",
+        "check": "modernize-use-nullptr",
+        "line_numbers": [12],
+        "columns": [24],
+    }
+
+    assert (
+        classify_failure(
+            "patch",
+            "model did not return valid edit JSON",
+        )
+        == "malformed_model_response"
+    )
+
+    assert (
+        classify_failure(
+            "patch",
+            "`old` text must match exactly once, matched 0",
+        )
+        == "no_exact_match"
+    )
+
+    assert (
+        classify_failure(
+            "build",
+            "compiler returned an error",
+        )
+        == "compile_error"
+    )
+
+    assert (
+        classify_failure(
+            "test",
+            "ctest reported a failure",
+        )
+        == "test_failure"
+    )
+
+    assert (
+        classify_failure(
+            "build",
+            "timeout after 900s",
+        )
+        == "timeout"
+    )
+def test_apply_edits_uses_clang_target_to_disambiguate():
+    from cppmigrate.scanner import Candidate
+
+    source = (
+        "_end = 0;\n"
+        "int value = 1;\n"
+        "_end = 0;\n"
+    )
+
+    candidate = Candidate(
+        file="main.cpp",
+        pattern="nullptr",
+        description="Use nullptr.",
+        line_numbers=[3],
+        columns=[8],
+        backend="clang-tidy",
+        check="modernize-use-nullptr",
+    )
+
+    result = apply_edits(
+        source,
+        [
+            {
+                "old": "_end = 0;",
+                "new": "_end = nullptr;",
+            }
+        ],
+        candidate=candidate,
+    )
+
+    assert result == (
+        "_end = 0;\n"
+        "int value = 1;\n"
+        "_end = nullptr;\n"
+    )

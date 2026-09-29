@@ -149,16 +149,118 @@ def match_source_newlines(
     return normalized
 
 
-def apply_edits(source: str, edits: list[dict]) -> str:
-    for e in edits:
-        old, new = e.get("old"), e.get("new")
-        if not isinstance(old, str) or not isinstance(new, str) or not old:
+def target_offsets(
+    source: str,
+    candidate: Candidate | None,
+) -> list[int]:
+    if candidate is None or not candidate.columns:
+        return []
+
+    lines = source.splitlines(keepends=True)
+    line_starts: list[int] = []
+    offset = 0
+
+    for line in lines:
+        line_starts.append(offset)
+        offset += len(line)
+
+    offsets: list[int] = []
+
+    for line_number, column in zip(
+        candidate.line_numbers,
+        candidate.columns,
+    ):
+        if line_number < 1 or line_number > len(lines):
+            raise EditError(
+                f"target line is outside the file: {line_number}"
+            )
+
+        line = lines[line_number - 1].rstrip("\r\n")
+        character_index = column - 1
+
+        if character_index < 0 or character_index >= len(line):
+            raise EditError(
+                "target column is outside the source line: "
+                f"line {line_number}, column {column}"
+            )
+
+        offsets.append(
+            line_starts[line_number - 1] + character_index
+        )
+
+    return offsets
+
+
+def find_match_offsets(source: str, old: str) -> list[int]:
+    matches: list[int] = []
+    start = 0
+
+    while True:
+        match = source.find(old, start)
+
+        if match == -1:
+            break
+
+        matches.append(match)
+        start = match + 1
+
+    return matches
+
+
+def apply_edits(
+    source: str,
+    edits: list[dict],
+    candidate: Candidate | None = None,
+) -> str:
+    for edit in edits:
+        old = edit.get("old")
+        new = edit.get("new")
+
+        if (
+            not isinstance(old, str)
+            or not isinstance(new, str)
+            or not old
+        ):
             raise EditError("malformed edit")
 
         old = match_source_newlines(old, source)
         new = match_source_newlines(new, source)
 
-        if source.count(old) != 1:
-            raise EditError(f"`old` text must match exactly once, matched {source.count(old)}: {old[:60]!r}")
-        source = source.replace(old, new)
+        matches = find_match_offsets(source, old)
+        targets = target_offsets(source, candidate)
+
+        if targets:
+            anchored_matches = [
+                match
+                for match in matches
+                if any(
+                    match <= target < match + len(old)
+                    for target in targets
+                )
+            ]
+
+            if len(anchored_matches) != 1:
+                raise EditError(
+                    "`old` text must match exactly once at target, "
+                    f"matched {len(anchored_matches)} at target "
+                    f"and {len(matches)} globally: {old[:60]!r}"
+                )
+
+            match = anchored_matches[0]
+
+        else:
+            if len(matches) != 1:
+                raise EditError(
+                    "`old` text must match exactly once, "
+                    f"matched {len(matches)}: {old[:60]!r}"
+                )
+
+            match = matches[0]
+
+        source = (
+            source[:match]
+            + new
+            + source[match + len(old):]
+        )
+
     return source
