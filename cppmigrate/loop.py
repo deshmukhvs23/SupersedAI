@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
+from .clang_scanner import scan_clang
 from .patcher import EditError, apply_edits, propose_edits
 from .scanner import Candidate, scan
 from .validator import configure, validate
@@ -53,6 +54,7 @@ def migrate_file(
     repo: Path,
     cand: Candidate,
     max_retries: int = 3,
+    build_dir: str = "build",
 ) -> tuple[Result, list[AttemptResult]]:
     path = repo / cand.file
     original = read_source(path)
@@ -91,7 +93,7 @@ def migrate_file(
             continue
 
         write_source(path, new_source)
-        validation = validate(repo)
+        validation = validate(repo, build_dir)
 
         if validation.ok:
             attempt_results.append(
@@ -154,8 +156,13 @@ def run(
     limit: int,
     out: Path,
     target_file: str | None = None,
+    backend: str = "regex",
+    build_dir: str = "build",
 ) -> list[Result]:
-    if not configure(repo).ok or not validate(repo).ok:
+    if (
+        not configure(repo, build_dir).ok
+        or not validate(repo, build_dir).ok
+    ):
         raise SystemExit(
             "Baseline build/tests fail: "
             "pick a repo that passes before changes."
@@ -163,7 +170,14 @@ def run(
 
     results: list[Result] = []
 
-    candidates = scan(repo, pattern)
+    if backend == "regex":
+        candidates = scan(repo, pattern)
+    elif backend == "clang":
+        candidates = scan_clang(repo, pattern, build_dir)
+    else:
+        raise ValueError(
+            f"Unsupported scanner backend: {backend}"
+        )
 
     if target_file is not None:
         candidates = [
@@ -179,7 +193,11 @@ def run(
             )
 
     for candidate in candidates[:limit]:
-        result, attempt_results = migrate_file(repo, candidate)
+        result, attempt_results = migrate_file(
+            repo,
+            candidate,
+            build_dir=build_dir,
+        )
         results.append(result)
 
         print(

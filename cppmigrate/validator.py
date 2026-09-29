@@ -20,7 +20,17 @@ def run(cmd: list[str], cwd: Path, timeout: int = 900) -> tuple[int, str]:
 
 
 def configure(repo: Path, build_dir: str = "build") -> ValidationResult:
-    code, log = run(["cmake", "-S", ".", "-B", build_dir], repo)
+    code, log = run(
+        [
+            "cmake",
+            "-S",
+            ".",
+            "-B",
+            build_dir,
+            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        ],
+        repo,
+    )
     return ValidationResult(code == 0, "configure", log)
 
 

@@ -62,7 +62,7 @@ def test_migrate_retries_with_strong_model(monkeypatch, tmp_path):
 
         return [{"old": "NULL", "new": "nullptr"}]
 
-    def fake_validate(repo):
+    def fake_validate(repo, build_dir="build"):
         return ValidationResult(
             ok=True,
             stage="test",
@@ -153,7 +153,7 @@ def test_migrate_preserves_crlf_line_endings(
     monkeypatch.setattr(
         migration_loop,
         "validate",
-        lambda repo: ValidationResult(
+        lambda repo, build_dir="build": ValidationResult(
             ok=True,
             stage="test",
             log_tail="",
@@ -238,3 +238,61 @@ def test_parse_clang_diagnostics_deduplicates_candidates(
     assert candidate.columns == [17]
     assert candidate.backend == "clang-tidy"
     assert candidate.check == "modernize-use-nullptr"
+def test_extract_context_marks_exact_clang_target():
+    from cppmigrate.patcher import extract_context
+
+    line = "int len = vsnprintf( 0, 0, format, va );"
+
+    context = extract_context(
+        line + "\n",
+        line_numbers=[1],
+        columns=[22],
+        radius=0,
+    )
+
+    context_lines = context.splitlines()
+
+    assert context_lines[0] == line
+    assert context_lines[1].index("^") == 21
+    assert "TARGET line 1, column 22" in context_lines[1]
+
+
+def test_parse_edits_accepts_one_extra_closing_brace():
+    raw = (
+        '{"edits":['
+        '{"old":"0","new":"nullptr"}'
+        ']}}'
+    )
+
+    assert parse_edits(raw) == [
+        {"old": "0", "new": "nullptr"}
+    ]
+def test_extract_context_marks_exact_clang_target():
+    from cppmigrate.patcher import extract_context
+
+    line = "int len = vsnprintf( 0, 0, format, va );"
+
+    context = extract_context(
+        line + "\n",
+        line_numbers=[1],
+        columns=[22],
+        radius=0,
+    )
+
+    context_lines = context.splitlines()
+
+    assert context_lines[0] == line
+    assert context_lines[1].index("^") == 21
+    assert "TARGET line 1, column 22" in context_lines[1]
+
+
+def test_parse_edits_accepts_one_extra_closing_brace():
+    raw = (
+        '{"edits":['
+        '{"old":"0","new":"nullptr"}'
+        ']}}'
+    )
+
+    assert parse_edits(raw) == [
+        {"old": "0", "new": "nullptr"}
+    ]

@@ -6,10 +6,17 @@ from .llm import chat
 from .scanner import Candidate
 
 SYSTEM = (
-    "You are a careful C++ modernization assistant. Make the minimal change needed. "
-    "Never change behavior. Respond with JSON only, no prose, in the form "
-    '{"edits":[{"old":"<exact text from the file>","new":"<replacement>"}]}. '
-    "Each `old` must appear exactly once in the file, so include enough surrounding context."
+    "You are a careful C++ modernization assistant. "
+    "Make the minimal change needed. Never change behavior. "
+    "Respond with JSON only, no prose, in the form "
+    '{"edits":[{"old":"<exact text from the file>",'
+    '"new":"<replacement>"}]}. '
+    "Each `old` must appear exactly once in the file, so include "
+    "enough real source context to make it unique. "
+    "When the context contains a '^ TARGET' marker, modify only "
+    "the token directly above that caret. The TARGET marker is an "
+    "annotation, not source code; never include it in `old` or `new`. "
+    "Only the targeted token should differ between `old` and `new`."
 )
 
 
@@ -19,10 +26,19 @@ class EditError(Exception):
 def extract_context(
     source: str,
     line_numbers: list[int],
+    columns: list[int] | None = None,
     radius: int = 12,
 ) -> str:
     lines = source.splitlines()
     ranges: list[tuple[int, int]] = []
+
+    targets = {
+        line_number: column
+        for line_number, column in zip(
+            line_numbers,
+            columns or [],
+        )
+    }
 
     for line_number in sorted(set(line_numbers)):
         start = max(0, line_number - radius - 1)
@@ -37,10 +53,26 @@ def extract_context(
         else:
             ranges.append((start, end))
 
-    snippets = [
-        "\n".join(lines[start:end])
-        for start, end in ranges
-    ]
+    snippets: list[str] = []
+
+    for start, end in ranges:
+        snippet_lines: list[str] = []
+
+        for index in range(start, end):
+            line_number = index + 1
+            snippet_lines.append(lines[index])
+
+            column = targets.get(line_number)
+
+            if column is not None and column > 0:
+                marker = (
+                    " " * (column - 1)
+                    + f"^ TARGET line {line_number}, "
+                    + f"column {column}"
+                )
+                snippet_lines.append(marker)
+
+        snippets.append("\n".join(snippet_lines))
 
     return "\n\n... omitted ...\n\n".join(snippets)
 
@@ -49,6 +81,7 @@ def propose_edits(source: str, cand: Candidate, feedback: str | None, tier: str 
     context = extract_context(
         source,
         cand.line_numbers,
+	columns = cand.columns,
     )
 
     user = (
@@ -65,18 +98,40 @@ def propose_edits(source: str, cand: Candidate, feedback: str | None, tier: str 
 
 
 def parse_edits(raw: str) -> list[dict]:
-    raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
+    raw = re.sub(
+        r"^```(?:json)?|```$",
+        "",
+        raw.strip(),
+        flags=re.M,
+    ).strip()
+
     try:
-        edits = json.loads(raw)["edits"]
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload, end = json.JSONDecoder().raw_decode(raw)
+
+            # Recover only from one accidental trailing brace.
+            if raw[end:].strip() != "}":
+                raise
+
+        edits = payload["edits"]
+
+    except (
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+    ) as error:
         preview = raw[:200]
 
         raise EditError(
             "model did not return valid edit JSON: "
             f"{error}; response preview={preview!r}"
         )
+
     if not isinstance(edits, list) or not edits:
         raise EditError("no edits returned")
+
     return edits
 
 def match_source_newlines(
