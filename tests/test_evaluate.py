@@ -59,3 +59,37 @@ def test_summarize_records():
     assert summary["failure_categories"] == {
         "non_unique_match": 1,
     }
+
+
+def test_summarize_metadata_enriched_jsonl(tmp_path):
+    import json
+    from cppmigrate.evaluate import load_records
+
+    records = [
+        {
+            "file": "main.cpp", "pattern": "nullptr", "attempt": 1,
+            "model_tier": "fast", "success": False, "seconds": 2.0,
+            "failure_category": "compile_error",
+        },
+        {
+            "file": "main.cpp", "pattern": "nullptr", "attempt": 2,
+            "model_tier": "strong", "success": True, "seconds": 3.0,
+        },
+    ]
+    enriched = [
+        {**record, "run_id": "tinyxml2-nullptr-run-02", "repo_revision": "8224e42"}
+        for record in records
+    ]
+    path = tmp_path / "results.jsonl"
+    path.write_text("".join(json.dumps(record) + "\n" for record in enriched))
+
+    summary = summarize_records(load_records(path))
+
+    assert summary == summarize_records(records)
+    assert summary["candidates"] == 1
+    assert summary["validated"] == 1
+    assert summary["attempts"] == 2
+    assert summary["first_pass_rate"] == 0.0
+    assert summary["total_seconds"] == 5.0
+    assert summary["model_calls"] == {"fast": 1, "strong": 1}
+    assert summary["failure_categories"] == {"compile_error": 1}

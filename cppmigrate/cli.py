@@ -32,6 +32,10 @@ def main():
         help="only migrate this repository-relative file",
     )
     ap.add_argument("--out", type=Path, default=Path("results.jsonl"))
+    ap.add_argument(
+        "--run-id",
+        help="identifies one evaluation run; generated automatically when omitted",
+    )
     a = ap.parse_args()
     run(
         a.repo.resolve(),
@@ -41,6 +45,7 @@ def main():
         target_file=a.target_file,
         backend=a.backend,
         build_dir=a.build_dir,
+        run_id=a.run_id,
     )
 
 

@@ -1,6 +1,8 @@
 """Core agent loop: propose edit -> apply -> build/test -> feed failures back -> retry."""
 import json
+import subprocess
 import time
+import uuid
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
@@ -26,6 +28,8 @@ class AttemptResult:
     line_numbers: list[int] = field(default_factory=list)
     columns: list[int] = field(default_factory=list)
     failure_category: str = ""
+    run_id: str = ""
+    repo_revision: str = "unknown"
 
 
 @dataclass
@@ -54,6 +58,45 @@ def candidate_metadata(cand: Candidate) -> dict:
         "columns": list(cand.columns),
     }
 
+def get_repo_revision(repo: Path) -> str:
+    try:
+        process = subprocess.run(
+            [
+                "git",
+                "rev-parse",
+                "--verify",
+                "HEAD",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return "unknown"
+
+    if process.returncode != 0:
+        return "unknown"
+
+    return process.stdout.strip() or "unknown"
+
+
+def generate_run_id() -> str:
+    timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    return f"{timestamp}-{uuid.uuid4().hex[:8]}"
+
+
+def run_metadata(
+    repo: Path,
+    run_id: str | None = None,
+) -> dict:
+    if run_id is None:
+        run_id = generate_run_id()
+
+    return {
+        "run_id": run_id,
+        "repo_revision": get_repo_revision(repo),
+    }
 
 def classify_failure(stage: str, message: str) -> str:
     if "timeout after" in message:
@@ -94,18 +137,24 @@ def write_source(path: Path, content: str) -> None:
     ) as source_file:
         source_file.write(content)
 
-
 def migrate_file(
     repo: Path,
     cand: Candidate,
     max_retries: int = 3,
     build_dir: str = "build",
+    run_id: str = "",
+    repo_revision: str = "unknown",
 ) -> tuple[Result, list[AttemptResult]]:
     path = repo / cand.file
     original = read_source(path)
     feedback = None
     migration_start = time.time()
     attempt_results: list[AttemptResult] = []
+    attempt_metadata = {
+        **candidate_metadata(cand),
+        "run_id": run_id,
+        "repo_revision": repo_revision,
+    }
 
     for attempt in range(1, max_retries + 1):
         attempt_start = time.time()
@@ -137,7 +186,7 @@ def migrate_file(
                         "patch",
                         feedback,
                     ),
-                    **candidate_metadata(cand),
+                    **attempt_metadata,
                 )
             )
             continue
@@ -156,7 +205,7 @@ def migrate_file(
                     stage="test",
                     seconds=time.time() - attempt_start,
                     edit_count=len(edits),
-		    **candidate_metadata(cand),
+                    **attempt_metadata,
                 )
             )
 
@@ -185,11 +234,11 @@ def migrate_file(
                 seconds=time.time() - attempt_start,
                 edit_count=len(edits),
                 note=feedback[:200],
-		failure_category=classify_failure(
-			validation.stage,
-			validation.log_tail,
-		),
-		**candidate_metadata(cand),
+                failure_category=classify_failure(
+                    validation.stage,
+                    validation.log_tail,
+                ),
+                **attempt_metadata,
             )
         )
 
@@ -214,7 +263,9 @@ def run(
     target_file: str | None = None,
     backend: str = "regex",
     build_dir: str = "build",
+    run_id: str | None = None,
 ) -> list[Result]:
+    metadata = run_metadata(repo, run_id)
     if (
         not configure(repo, build_dir).ok
         or not validate(repo, build_dir).ok
@@ -253,6 +304,7 @@ def run(
             repo,
             candidate,
             build_dir=build_dir,
+            **metadata,
         )
         results.append(result)
 
@@ -275,4 +327,3 @@ def run(
         "patches validated"
     )
     return results
-

@@ -19,9 +19,21 @@ scan (regex or clang-tidy) -> LLM proposes exact-match edits -> apply -> cmake b
     python -m cppmigrate.cli /path/to/cmake-repo --pattern nullptr --limit 10
     python -m cppmigrate.cli /path/to/cmake-repo --pattern nullptr --backend clang --build-dir build --limit 10
     python -m cppmigrate.cli /path/to/cmake-repo --pattern nullptr --file src/file.cpp --limit 1
+    python -m cppmigrate.cli /path/to/tinyxml2 --pattern nullptr --run-id tinyxml2-nullptr-run-02
 
 Each attempt is appended to `results.jsonl` (attempt number, model tier, stage, success, edit count, seconds) to compute the numbers
 for your write-up: validated patches / attempted, avg attempts, time per fix.
+
+Every JSONL attempt also records experiment metadata: `run_id` identifies the
+evaluation run, and `repo_revision` records the target repository's Git HEAD
+before migration (`unknown` when Git metadata is unavailable). All candidates
+and retries in one run share these values.
+
+When `--run-id` is omitted, the ID combines a UTC timestamp with an eight-character
+UUID4 hexadecimal suffix, for example `20260930T123456Z-a1b2c3d4`. The random suffix
+reduces collisions between runs started in the same second, but does not guarantee
+uniqueness. Supply a unique `--run-id` when your experiment requires that guarantee;
+an explicitly supplied ID is preserved unchanged.
 
 ## Evaluation
 
