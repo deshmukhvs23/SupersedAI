@@ -35,7 +35,34 @@ reduces collisions between runs started in the same second, but does not guarant
 uniqueness. Supply a unique `--run-id` when your experiment requires that guarantee;
 an explicitly supplied ID is preserved unchanged.
 
-## Evaluation
+## Evaluation highlights
+
+Powered by **Nebius Token Factory**, using **NVIDIA Nemotron-3 Nano 30B A3B**
+(`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`) for fast-model calls and
+**NVIDIA Nemotron-3 Super 120B A12B** (`nvidia/nemotron-3-super-120b-a12b`)
+for strong-model escalation.
+
+The completed location-aware run `tinyxml2-8224e42-location-aware-limit10-run01`
+validated **10/10** of the first 10 `modernize-use-nullptr` candidates in
+TinyXML-2's `tinyxml2.cpp`, discovered with `clang-tidy` for the `nullptr`
+pattern at revision `8224e427b655b83dae5e2298f1e6919523a78737`.
+First-pass success was **90%**, with **10%** escalation: 11 attempts
+(1.10 per candidate), 10 fast-model calls, one strong-model call, and one
+`no_exact_match` failure. Total time was 192.78 seconds (19.28 seconds average
+and 16.18 seconds median per candidate).
+
+The final CMake build and CTest passed; the final source diff contains exactly
+10 NULL-pointer-style integer zero replacements with `nullptr`. Candidate
+metadata and revision invariants passed. The agent preserved the target's
+CRLF line endings; the stored diff was normalized only for repository cleanliness.
+
+Artifacts: [raw attempts](evaluations/raw/tinyxml2-8224e42-location-aware-limit10-run01.jsonl)
+and [source diff](evaluations/raw/tinyxml2-8224e42-location-aware-limit10-run01.diff).
+This expands the sample but remains limited to one repository, one source file,
+one modernization pattern, and one run; it does not establish generalized
+production performance.
+
+### Earlier five-candidate comparison
 
 On the first five `clang-tidy` `modernize-use-nullptr` candidates from
 TinyXML-2 revision `8224e42`, both patching strategies validated all five
