@@ -77,7 +77,8 @@ def test_summarize_metadata_enriched_jsonl(tmp_path):
         },
     ]
     enriched = [
-        {**record, "run_id": "tinyxml2-nullptr-run-02", "repo_revision": "8224e42"}
+        {**record, "run_id": "tinyxml2-nullptr-run-02", "repo_revision": "8224e42",
+         "cmake_args": ["-DPUGIXML_BUILD_TESTS=ON"]}
         for record in records
     ]
     path = tmp_path / "results.jsonl"

@@ -457,8 +457,9 @@ def test_get_repo_revision_handles_unavailable_git(monkeypatch, tmp_path, error)
     assert migration_loop.get_repo_revision(tmp_path) == "unknown"
 
 
+@pytest.mark.parametrize("cmake_args", [None, ["-DPUGIXML_BUILD_TESTS=ON", "-DCMAKE_BUILD_TYPE=Debug"]])
 @pytest.mark.parametrize("run_id", [None, "evaluation-001"])
-def test_run_propagates_metadata_to_all_attempts_and_jsonl(monkeypatch, tmp_path, run_id):
+def test_run_propagates_metadata_to_all_attempts_and_jsonl(monkeypatch, tmp_path, run_id, cmake_args):
     import json
     import cppmigrate.loop as migration_loop
     from cppmigrate.validator import ValidationResult
@@ -473,10 +474,13 @@ def test_run_propagates_metadata_to_all_attempts_and_jsonl(monkeypatch, tmp_path
         return {"run_id": supplied_run_id or "20260930T123456Z-a1b2c3d4", "repo_revision": "abc123"}
 
     monkeypatch.setattr(migration_loop, "run_metadata", fake_metadata)
-    monkeypatch.setattr(
-        migration_loop, "configure",
-        lambda repo, build_dir: ValidationResult(True, "configure", ""),
-    )
+    configure_calls = []
+
+    def fake_configure(repo, build_dir, cmake_args=None):
+        configure_calls.append((repo, build_dir, cmake_args))
+        return ValidationResult(True, "configure", "")
+
+    monkeypatch.setattr(migration_loop, "configure", fake_configure)
     monkeypatch.setattr(
         migration_loop, "validate",
         lambda repo, build_dir: ValidationResult(True, "test", ""),
@@ -500,15 +504,18 @@ def test_run_propagates_metadata_to_all_attempts_and_jsonl(monkeypatch, tmp_path
     out = tmp_path / "results.jsonl"
     results = migration_loop.run(
         tmp_path, "nullptr", 2, out, build_dir="custom-build", run_id=run_id,
+        cmake_args=cmake_args,
     )
 
     assert metadata_calls == [(tmp_path, run_id)]
+    assert configure_calls == [(tmp_path, "custom-build", cmake_args or [])]
     expected = {"run_id": run_id or "20260930T123456Z-a1b2c3d4", "repo_revision": "abc123"}
-    assert migrate_calls == [{"build_dir": "custom-build", **expected}] * 2
+    assert migrate_calls == [{"build_dir": "custom-build", "cmake_args": cmake_args or [], **expected}] * 2
     assert len(results) == 2
     assert all(result.success and result.attempts == 2 for result in results)
     records = [json.loads(line) for line in out.read_text().splitlines()]
     assert len(records) == 4
+    assert all(record["cmake_args"] == (cmake_args or []) for record in records)
     assert {record["file"] for record in records} == {"a.cpp", "b.cpp"}
     assert [record["success"] for record in records] == [False, True, False, True]
     assert all({key: record[key] for key in expected} == expected for record in records)
@@ -531,3 +538,71 @@ def test_cli_passes_optional_run_id(monkeypatch, tmp_path, run_id):
     assert len(calls) == 1
     assert calls[0][0][0] == tmp_path.resolve()
     assert calls[0][1]["run_id"] == run_id
+
+
+def test_attempt_metadata_lists_are_independent(monkeypatch, tmp_path):
+    import cppmigrate.loop as migration_loop
+    from cppmigrate.scanner import Candidate
+    from cppmigrate.validator import ValidationResult
+
+    candidates = []
+    for filename in ("a.cpp", "b.cpp"):
+        (tmp_path / filename).write_text("int* pointer = NULL;\n")
+        candidates.append(Candidate(
+            file=filename, pattern="nullptr", description="Use nullptr.",
+            line_numbers=[1], columns=[16],
+        ))
+    caller_args = ["-DPUGIXML_BUILD_TESTS=ON"]
+
+    def fake_propose(source, candidate, feedback, tier):
+        if tier == "fast":
+            raise EditError("no edits returned")
+        return [{"old": "NULL", "new": "nullptr"}]
+
+    monkeypatch.setattr(migration_loop, "propose_edits", fake_propose)
+    monkeypatch.setattr(migration_loop, "validate", lambda *a: ValidationResult(True, "test", ""))
+    groups = [migration_loop.migrate_file(tmp_path, candidate, cmake_args=caller_args)[1]
+              for candidate in candidates]
+    assert all(len(attempts) == 2 for attempts in groups)
+    first = groups[0][0]
+    first.cmake_args.append("-DCHANGED=ON")
+    first.line_numbers.append(99)
+    first.columns.append(99)
+
+    for attempt in [groups[0][1], *groups[1]]:
+        assert attempt.cmake_args == ["-DPUGIXML_BUILD_TESTS=ON"]
+        assert attempt.line_numbers == [1]
+        assert attempt.columns == [16]
+    assert caller_args == ["-DPUGIXML_BUILD_TESTS=ON"]
+    assert all(candidate.line_numbers == [1] and candidate.columns == [16]
+               for candidate in candidates)
+
+
+@pytest.mark.parametrize("stage, log", [
+    ("configure", "CMake option is invalid"),
+    ("test_discovery", "No tests are registered with CTest"),
+])
+def test_run_baseline_failure_diagnostics(monkeypatch, tmp_path, stage, log):
+    import cppmigrate.loop as migration_loop
+    from cppmigrate.validator import ValidationResult
+
+    monkeypatch.setattr(migration_loop, "run_metadata", lambda *a: {})
+    monkeypatch.setattr(migration_loop, "configure", lambda *a, **kw: ValidationResult(
+        stage != "configure", "configure", log if stage == "configure" else "",
+    ))
+
+    def fake_validate(*args):
+        assert stage != "configure", "configure failure must skip validation"
+        return ValidationResult(False, stage, log)
+
+    monkeypatch.setattr(migration_loop, "validate", fake_validate)
+    monkeypatch.setattr(migration_loop, "scan", lambda *a: pytest.fail("baseline failed"))
+    out = tmp_path / "results.jsonl"
+    with pytest.raises(SystemExit) as error:
+        migration_loop.run(tmp_path, "nullptr", 1, out)
+    message = str(error.value)
+    assert stage in message
+    assert log in message
+    assert "repository-specific CMake option" in message
+    assert "--cmake-arg=-DNAME=VALUE" in message
+    assert not out.exists()

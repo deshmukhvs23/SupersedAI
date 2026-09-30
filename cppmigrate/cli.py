@@ -21,6 +21,12 @@ def main():
         help="repository-relative CMake build directory",
     )
     ap.add_argument(
+        "--cmake-arg",
+        action="append",
+        default=[],
+        help="extra CMake configure argument (repeatable); use --cmake-arg=-DPUGIXML_BUILD_TESTS=ON for values beginning with '-'",
+    )
+    ap.add_argument(
         "--limit",
         type=int,
         default=10,
@@ -46,6 +52,7 @@ def main():
         backend=a.backend,
         build_dir=a.build_dir,
         run_id=a.run_id,
+        cmake_args=a.cmake_arg,
     )
 
 

@@ -30,6 +30,7 @@ class AttemptResult:
     failure_category: str = ""
     run_id: str = ""
     repo_revision: str = "unknown"
+    cmake_args: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -144,17 +145,22 @@ def migrate_file(
     build_dir: str = "build",
     run_id: str = "",
     repo_revision: str = "unknown",
+    cmake_args: list[str] | None = None,
 ) -> tuple[Result, list[AttemptResult]]:
     path = repo / cand.file
     original = read_source(path)
     feedback = None
     migration_start = time.time()
     attempt_results: list[AttemptResult] = []
-    attempt_metadata = {
-        **candidate_metadata(cand),
-        "run_id": run_id,
-        "repo_revision": repo_revision,
-    }
+    cmake_args = list(cmake_args or [])
+
+    def attempt_metadata() -> dict:
+        return {
+            **candidate_metadata(cand),
+            "run_id": run_id,
+            "repo_revision": repo_revision,
+            "cmake_args": list(cmake_args),
+        }
 
     for attempt in range(1, max_retries + 1):
         attempt_start = time.time()
@@ -186,7 +192,7 @@ def migrate_file(
                         "patch",
                         feedback,
                     ),
-                    **attempt_metadata,
+                    **attempt_metadata(),
                 )
             )
             continue
@@ -205,7 +211,7 @@ def migrate_file(
                     stage="test",
                     seconds=time.time() - attempt_start,
                     edit_count=len(edits),
-                    **attempt_metadata,
+                    **attempt_metadata(),
                 )
             )
 
@@ -238,7 +244,7 @@ def migrate_file(
                     validation.stage,
                     validation.log_tail,
                 ),
-                **attempt_metadata,
+                **attempt_metadata(),
             )
         )
 
@@ -264,15 +270,19 @@ def run(
     backend: str = "regex",
     build_dir: str = "build",
     run_id: str | None = None,
+    cmake_args: list[str] | None = None,
 ) -> list[Result]:
+    cmake_args = list(cmake_args or [])
     metadata = run_metadata(repo, run_id)
-    if (
-        not configure(repo, build_dir).ok
-        or not validate(repo, build_dir).ok
-    ):
+    baseline = configure(repo, build_dir, cmake_args=cmake_args)
+    if baseline.ok:
+        baseline = validate(repo, build_dir)
+    if not baseline.ok:
         raise SystemExit(
-            "Baseline build/tests fail: "
-            "pick a repo that passes before changes."
+            f"Baseline {baseline.stage} failed: {baseline.log_tail}\n"
+            "Pick a repo that passes before changes. "
+            "If no tests are registered, enable repository tests with a "
+            "repository-specific CMake option via --cmake-arg=-DNAME=VALUE."
         )
 
     results: list[Result] = []
@@ -304,6 +314,7 @@ def run(
             repo,
             candidate,
             build_dir=build_dir,
+            cmake_args=cmake_args,
             **metadata,
         )
         results.append(result)
