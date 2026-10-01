@@ -2,8 +2,13 @@
 
 **A validation-first AI agent for safely modernizing legacy C++ code.**
 
+Verified on 20 candidates across TinyXML-2 and pugixml: 20/20 patches passed build and tests, with 95% first-pass success, supported by 72 offline tests.
+Scope: one pattern (`nullptr`), 10 candidates and one run per repository.
+
 LLM agent that modernizes legacy C++ (NVIDIA Nemotron via Nebius Token Factory) and only keeps
 a change if the project still **builds and passes its tests**.
+
+Submission: [submission package](SUBMISSION.md) · [three-minute demo script](docs/demo-script.md).
 
 ## Loop
 scan (regex or clang-tidy) -> LLM proposes exact-match edits -> apply -> cmake build -> ctest
