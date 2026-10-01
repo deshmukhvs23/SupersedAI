@@ -43,6 +43,20 @@ reduces collisions between runs started in the same second, but does not guarant
 uniqueness. Supply a unique `--run-id` when your experiment requires that guarantee;
 an explicitly supplied ID is preserved unchanged.
 
+Each attempt also records `response_model`, `finish_reason`, `prompt_tokens`,
+`completion_tokens`, `total_tokens`, and `usage_available`. Missing usage has
+null token counts and `usage_available=false`; calls without a response have
+empty model and finish reason. Parsing and exact-match failures retain response
+telemetry. A `length` finish reason rejects the proposal before applying edits,
+records `truncated_model_response`, and follows normal retry/escalation.
+
+Run `python -m cppmigrate.evaluate results.jsonl` (or add `--json`) to report
+observed token totals, totals by model tier, average total tokens per model call
+with a reported total, tokens per validated candidate, and unavailable-usage
+attempt counts. Totals include failed attempts; missing usage is not estimated,
+so incomplete coverage yields partial totals. Older JSONL files retain their
+existing summaries. Monetary cost is not estimated without verified pricing.
+
 ## Evaluation highlights
 
 Powered by **Nebius Token Factory**, using **NVIDIA Nemotron-3 Nano 30B A3B**
@@ -126,7 +140,7 @@ MVP: regex and clang-tidy discovery, `nullptr` and `using` patterns,
 target-anchored prompts, location-aware patch application, model escalation,
 rollback, failure taxonomy, newline preservation, JSONL metrics, and a
 reproducible evaluation summarizer. Next: repeated full-repository evaluation,
-sandboxed validation, token/cost instrumentation, and ownership-aware
+sandboxed validation and ownership-aware
 migrations.
 
 ## License

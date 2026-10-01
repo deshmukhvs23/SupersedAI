@@ -73,7 +73,7 @@ def summarize_records(records: list[dict]) -> dict:
         )
     )
 
-    return {
+    summary = {
         "candidates": candidates,
         "validated": validated,
         "success_rate": (
@@ -115,6 +115,29 @@ def summarize_records(records: list[dict]) -> dict:
             sorted(failure_categories.items())
         ),
     }
+
+    # Preserve the old summary shape for records predating telemetry.
+    if any("usage_available" in record for record in records):
+        fields = ("prompt_tokens", "completion_tokens", "total_tokens")
+        available = [record for record in records if record.get("usage_available")]
+        totals = {name: sum(record.get(name) or 0 for record in available) for name in fields}
+        tiers = {}
+        for tier in sorted(model_calls):
+            tiers[tier] = {
+                name: sum(record.get(name) or 0 for record in available
+                          if record.get("model_tier", "unknown") == tier)
+                for name in fields
+            }
+        total_calls = sum(record.get("total_tokens") is not None for record in available)
+        summary["token_usage"] = {
+            **totals,
+            "avg_total_tokens_per_model_call": totals["total_tokens"] / total_calls if total_calls else None,
+            "total_tokens_per_validated_candidate": totals["total_tokens"] / validated if validated and total_calls else None,
+            "by_model_tier": tiers,
+            "attempts_with_unavailable_usage": len(records) - len(available),
+            "calls_with_total_tokens": total_calls,
+        }
+    return summary
 
 
 def load_records(path: Path) -> list[dict]:
@@ -192,6 +215,17 @@ def format_markdown(path: Path, summary: dict) -> str:
     else:
         lines.append("- None")
 
+    if "token_usage" in summary:
+        usage = summary["token_usage"]
+        lines.extend(["", "## Token usage", "", "Observed totals; averages use calls with reported total tokens.", ""])
+        for name in ("prompt_tokens", "completion_tokens", "total_tokens",
+                     "avg_total_tokens_per_model_call", "total_tokens_per_validated_candidate",
+                     "attempts_with_unavailable_usage", "calls_with_total_tokens"):
+            lines.append(f"- {name}: {usage[name]}")
+        lines.extend(["", "| Model tier | Prompt tokens | Completion tokens | Total tokens |",
+                      "|---|---:|---:|---:|"])
+        for tier, totals in usage["by_model_tier"].items():
+            lines.append(f"| {tier} | {totals['prompt_tokens']} | {totals['completion_tokens']} | {totals['total_tokens']} |")
     return "\n".join(lines)
 
 

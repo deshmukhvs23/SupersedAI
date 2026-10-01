@@ -7,7 +7,8 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 from .clang_scanner import scan_clang
-from .patcher import EditError, apply_edits, propose_edits
+from .llm import LLMResponse
+from .patcher import EditError, apply_edits, propose_edits, normalize_proposal
 from .scanner import Candidate, scan
 from .validator import configure, validate
 
@@ -31,6 +32,12 @@ class AttemptResult:
     run_id: str = ""
     repo_revision: str = "unknown"
     cmake_args: list[str] = field(default_factory=list)
+    response_model: str = ""
+    finish_reason: str = ""
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    usage_available: bool = False
 
 
 @dataclass
@@ -157,6 +164,7 @@ def migrate_file(
     def attempt_metadata() -> dict:
         return {
             **candidate_metadata(cand),
+            **response.attempt_metadata(),
             "run_id": run_id,
             "repo_revision": repo_revision,
             "cmake_args": list(cmake_args),
@@ -166,16 +174,20 @@ def migrate_file(
         attempt_start = time.time()
         tier = "fast" if attempt == 1 else "strong"
 
+        response = LLMResponse()
         try:
-            edits = propose_edits(
+            proposal = normalize_proposal(propose_edits(
                 original,
                 cand,
                 feedback,
                 tier,
-            )
+            ))
+            response = proposal.response
+            edits = proposal.edits
             new_source = apply_edits(original, edits, candidate=cand,)
 
         except EditError as error:
+            response = error.response or response
             feedback = str(error)
 
             attempt_results.append(
@@ -188,7 +200,7 @@ def migrate_file(
                     stage="patch",
                     seconds=time.time() - attempt_start,
                     note=feedback[:200],
-                    failure_category=classify_failure(
+                    failure_category=error.failure_category or classify_failure(
                         "patch",
                         feedback,
                     ),

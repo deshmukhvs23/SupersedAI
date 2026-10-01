@@ -1,8 +1,9 @@
 """Ask the LLM for edits as exact-match search/replace pairs (more reliable than diffs)."""
 import json
 import re
+from dataclasses import dataclass
 
-from .llm import chat
+from .llm import LLMResponse, chat, normalize_response
 from .scanner import Candidate
 
 SYSTEM = (
@@ -21,7 +22,21 @@ SYSTEM = (
 
 
 class EditError(Exception):
-    pass
+    def __init__(self, message: str, response: LLMResponse | None = None,
+                 failure_category: str = ""):
+        super().__init__(message)
+        self.response = response
+        self.failure_category = failure_category
+
+
+@dataclass(frozen=True)
+class PatchProposal:
+    edits: list[dict]
+    response: LLMResponse = LLMResponse()
+
+
+def normalize_proposal(proposal: PatchProposal | list[dict]) -> PatchProposal:
+    return proposal if isinstance(proposal, PatchProposal) else PatchProposal(proposal)
 
 def extract_context(
     source: str,
@@ -77,7 +92,7 @@ def extract_context(
     return "\n\n... omitted ...\n\n".join(snippets)
 
 
-def propose_edits(source: str, cand: Candidate, feedback: str | None, tier: str = "fast") -> list[dict]:
+def propose_edits(source: str, cand: Candidate, feedback: str | None, tier: str = "fast") -> PatchProposal:
     context = extract_context(
         source,
         cand.line_numbers,
@@ -94,7 +109,18 @@ def propose_edits(source: str, cand: Candidate, feedback: str | None, tier: str 
     if feedback:
         user += f"\nYour previous attempt failed with:\n{feedback}\nFix it.\n"
     raw = chat([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}], tier=tier)
-    return parse_edits(raw)
+    response = normalize_response(raw)
+    if response.finish_reason == "length":
+        raise EditError(
+            "model response was truncated (finish_reason=length)",
+            response=response,
+            failure_category="truncated_model_response",
+        )
+    try:
+        return PatchProposal(parse_edits(response.content), response)
+    except EditError as error:
+        error.response = response
+        raise
 
 
 def parse_edits(raw: str) -> list[dict]:
