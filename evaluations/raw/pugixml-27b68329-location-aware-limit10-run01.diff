@@ -1,0 +1,71 @@
+diff --git a/src/pugixml.cpp b/src/pugixml.cpp
+index 7bb7beb..97a6796 100644
+--- a/src/pugixml.cpp
++++ b/src/pugixml.cpp
+@@ -326,7 +326,7 @@ PUGI_IMPL_NS_BEGIN
+ 		T* release()
+ 		{
+ 			T* result = data;
+-			data = NULL;
++			data = nullptr;
+ 			return result;
+ 		}
+ 	};
+@@ -509,9 +509,9 @@ PUGI_IMPL_NS_BEGIN
+ 		{
+ 			xml_memory_page* result = static_cast<xml_memory_page*>(memory);
+ 
+-			result->allocator = NULL;
+-			result->prev = NULL;
+-			result->next = NULL;
++			result->allocator = nullptr;
++			result->prev = nullptr;
++			result->next = nullptr;
+ 			result->busy_size = 0;
+ 			result->freed_size = 0;
+ 
+@@ -568,7 +568,7 @@ PUGI_IMPL_NS_BEGIN
+ 
+ 			// allocate block with some alignment, leaving memory for worst-case padding
+ 			void* memory = xml_memory::allocate(size);
+-			if (!memory) return NULL;
++			if (!memory) return nullptr;
+ 
+ 			// prepare page structure
+ 			xml_memory_page* page = xml_memory_page::construct(memory);
+@@ -651,7 +651,7 @@ PUGI_IMPL_NS_BEGIN
+ 
+ 			if (page->freed_size == page->busy_size)
+ 			{
+-				if (page->next == NULL)
++				if (page->next == nullptr)
+ 				{
+ 					assert(_root == page);
+ 
+@@ -698,7 +698,7 @@ PUGI_IMPL_NS_BEGIN
+ 			xml_memory_page* page;
+ 			xml_memory_string_header* header = static_cast<xml_memory_string_header*>(allocate_memory(full_size, page));
+ 
+-			if (!header) return NULL;
++			if (!header) return nullptr;
+ 
+ 			// setup header
+ 			ptrdiff_t page_offset = reinterpret_cast<char*>(header) - reinterpret_cast<char*>(page) - sizeof(xml_memory_page);
+@@ -760,7 +760,7 @@ PUGI_IMPL_NS_BEGIN
+ 		xml_memory_page* page = allocate_page(size <= large_allocation_threshold ? xml_memory_page_size : size);
+ 		out_page = page;
+ 
+-		if (!page) return NULL;
++		if (!page) return nullptr;
+ 
+ 		if (size <= large_allocation_threshold)
+ 		{
+@@ -1142,7 +1142,7 @@ namespace pugi
+ {
+ 	struct xml_attribute_struct
+ 	{
+-		xml_attribute_struct(impl::xml_memory_page* page): name(NULL), value(NULL), prev_attribute_c(NULL), next_attribute(NULL)
++		xml_attribute_struct(impl::xml_memory_page* page): name(nullptr), value(nullptr), prev_attribute_c(NULL), next_attribute(NULL)
+ 		{
+ 			header = PUGI_IMPL_GETHEADER_IMPL(this, page, 0);
+ 		}

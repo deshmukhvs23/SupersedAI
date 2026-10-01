@@ -94,6 +94,73 @@ but is still limited to one repository, one source file, one modernization
 pattern, and one run. These results do not establish generalized production
 performance or a repeatable latency improvement.
 
+## First cross-repository benchmark: pugixml
+
+- Date: 2026-10-01
+- Repository: pugixml
+- Revision: `27b68329de32cf9c601ca8eb6c588fd639960c40`
+- Run ID: `pugixml-27b68329-location-aware-limit10-run01`
+- Pattern: `nullptr`
+- Backend: `clang-tidy`
+- Check: `modernize-use-nullptr`
+- File: `src/pugixml.cpp`
+- Scope: first 10 candidates in the file
+- Semantic candidates discovered before evaluation: 263 total
+- Candidates in `src/pugixml.cpp`: 196
+- CMake arguments: `-DPUGIXML_BUILD_TESTS=ON`, `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`
+- Registered CTest tests: 1
+- Provider: **Nebius Token Factory**
+- Fast model: **NVIDIA Nemotron-3 Nano 30B A3B** (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`)
+- Strong model: **NVIDIA Nemotron-3 Super 120B A12B** (`nvidia/nemotron-3-super-120b-a12b`)
+- Validation: CMake build followed by CTest
+
+| Metric | Location-aware |
+|---|---:|
+| Validated patches | 10/10 |
+| Success rate | 100% |
+| First-pass success rate | 100% |
+| Escalation rate | 0% |
+| Total attempts | 10 |
+| Fast-model calls | 10 |
+| Strong-model calls | 0 |
+| Failure categories | none |
+| Total time | 116.61 seconds |
+| Average time per candidate | 11.66 seconds |
+| Median time per candidate | 10.93 seconds |
+
+The final build and CTest passed. Ten candidates produced nine changed lines
+because two independently anchored pointer candidates occurred on the same
+constructor line. All ten changes were manually reviewed as semantic
+pointer-null replacements.
+
+Artifacts: [raw JSONL records](raw/pugixml-27b68329-location-aware-limit10-run01.jsonl)
+and [final source diff](raw/pugixml-27b68329-location-aware-limit10-run01.diff).
+
+### Comparison of the two 10-candidate runs
+
+| Metric | TinyXML-2 | pugixml | Combined |
+|---|---:|---:|---:|
+| Validated patches | 10/10 | 10/10 | 20/20 |
+| First-pass success | 90% | 100% | 95% (19/20) |
+| Escalation rate | 10% | 0% | 5% (1/20) |
+| Total attempts | 11 | 10 | 21 |
+| Fast-model calls | 10 | 10 | 20 |
+| Strong-model calls | 1 | 0 | 1 |
+| Total seconds | 192.78 | 116.61 | 309.39 |
+| Average seconds per candidate | 19.28 | 11.66 | 15.47 |
+| Median seconds per candidate | 16.18 | 10.93 | — |
+
+This is SupersedAI's first cross-repository benchmark. Both runs validated
+all ten candidates; pugixml required no retries or strong-model escalation
+and had lower observed average and median latency. One run per repository
+does not establish a repeatable latency advantage.
+
+The benchmark covers only two repositories, only one modernization pattern
+(`nullptr`), only 10 candidates per repository, and one run per repository.
+Builds and tests establish regression confidence but do not prove semantic
+equivalence for all inputs. These results do not establish generalized
+production performance.
+
 ## Reproduce the summaries
 
 ```bash

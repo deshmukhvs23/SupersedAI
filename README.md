@@ -70,6 +70,36 @@ This expands the sample but remains limited to one repository, one source file,
 one modernization pattern, and one run; it does not establish generalized
 production performance.
 
+### First cross-repository benchmark
+
+On 2026-10-01, the pugixml run
+`pugixml-27b68329-location-aware-limit10-run01` validated **10/10** of the
+first 10 `nullptr` candidates in `src/pugixml.cpp`, using `clang-tidy`'s
+`modernize-use-nullptr` check at revision
+`27b68329de32cf9c601ca8eb6c588fd639960c40`. The final build and CTest passed,
+and all ten changes were manually reviewed as semantic pointer-null replacements.
+
+| Metric | TinyXML-2 (10 candidates) | pugixml (10 candidates) |
+|---|---:|---:|
+| Validated | 10/10 | 10/10 |
+| First-pass success | 90% | 100% |
+| Escalation rate | 10% | 0% |
+| Total attempts | 11 | 10 |
+| Strong-model calls | 1 | 0 |
+| Average seconds per candidate | 19.28 | 11.66 |
+| Median seconds per candidate | 16.18 | 10.93 |
+
+Combined: **20/20 validated**, **95% first-pass success** (19/20), and
+**5% escalation** (1/20), across 21 attempts, 20 fast-model calls, and one
+strong-model call. Total time was 309.39 seconds, averaging 15.47 seconds
+per candidate.
+
+pugixml artifacts: [raw attempts](evaluations/raw/pugixml-27b68329-location-aware-limit10-run01.jsonl)
+and [source diff](evaluations/raw/pugixml-27b68329-location-aware-limit10-run01.diff).
+This benchmark covers only two repositories, one modernization pattern,
+10 candidates per repository, and one run per repository. Builds and tests
+establish regression confidence but do not prove semantic equivalence for all inputs.
+
 ### Earlier five-candidate comparison
 
 On the first five `clang-tidy` `modernize-use-nullptr` candidates from
